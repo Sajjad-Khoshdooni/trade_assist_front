@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  trader-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: trader-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  trader-frontend-dev:
+    image: node:20-alpine
+    container_name: trader-frontend-dev
+    working_dir: /app
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+    command: sh -c "corepack enable && corepack prepare pnpm@latest --activate && pnpm install && pnpm dev"
+    restart: unless-stopped
+    profiles:
+      - dev
+
