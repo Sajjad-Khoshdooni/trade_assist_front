@@ -2,13 +2,14 @@
 
 import type React from "react"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
 import { TrendingUp, Send, ImageIcon, LogOut, Loader2 } from "lucide-react"
 import Link from "next/link"
+import { apiClient, ChatMessage } from "@/lib/api"
 
 interface Message {
   id: string
@@ -25,13 +26,16 @@ export default function ChatPage() {
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [userEmail, setUserEmail] = useState("")
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [initializing, setInitializing] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     // Check authentication
-    const token = localStorage.getItem("auth_token")
+    const token = apiClient.getToken()
     const email = localStorage.getItem("user_email")
     if (!token) {
       router.push("/auth")
@@ -39,37 +43,118 @@ export default function ChatPage() {
     }
     setUserEmail(email || "User")
 
-    // Load conversation from localStorage
-    const savedMessages = localStorage.getItem("chat_messages")
-    if (savedMessages) {
-      const parsedMessages = JSON.parse(savedMessages)
-      const messagesWithDates = parsedMessages.map((msg: Message) => ({
-        ...msg,
-        timestamp: new Date(msg.timestamp),
-      }))
-      setMessages(messagesWithDates)
-    } else {
-      // Welcome message
-      setMessages([
-        {
-          id: "1",
-          role: "assistant",
-          content:
-            "Hello! I'm your AI trading assistant. Upload a chart image or ask me anything about trading analysis.",
-          timestamp: new Date(),
-        },
-      ])
+    // Initialize chat session and load messages
+    const initializeChat = async () => {
+      try {
+        setInitializing(true)
+        // Get or create a chat session
+        const sessions = await apiClient.getChatSessions()
+        let session = sessions.length > 0 ? sessions[0] : null
+        
+        if (!session) {
+          session = await apiClient.createChatSession("Main Chat")
+        }
+        
+        setSessionId(session.id)
+        
+        // Load messages
+        const apiMessages = await apiClient.getChatMessages(session.id)
+        
+        if (apiMessages.length === 0) {
+          // Welcome message
+          setMessages([
+            {
+              id: "welcome",
+              role: "assistant",
+              content:
+                "Hello! I'm your AI trading assistant. Upload a chart image or ask me anything about trading analysis.",
+              timestamp: new Date(),
+            },
+          ])
+        } else {
+          // Convert API messages to UI format
+          const uiMessages: Message[] = apiMessages.map((msg: ChatMessage) => ({
+            id: msg.id,
+            role: msg.sender === "user" ? "user" : "assistant",
+            content: msg.content || "",
+            image: msg.image_file ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${msg.image_file}` : undefined,
+            timestamp: new Date(msg.timestamp),
+          }))
+          setMessages(uiMessages)
+          
+          // Check if any messages are still processing
+          const processingMessages = apiMessages.filter(
+            (msg: ChatMessage) => msg.processing_status === "processing" || msg.processing_status === "pending"
+          )
+          
+          if (processingMessages.length > 0) {
+            // Start polling for updates
+            startPolling(session.id, processingMessages.map((m: ChatMessage) => m.id))
+          }
+        }
+      } catch (error) {
+        console.error("Failed to initialize chat:", error)
+        if (error instanceof Error && error.message.includes("401")) {
+          router.push("/auth")
+        }
+      } finally {
+        setInitializing(false)
+      }
     }
-  }, [router])
+
+    initializeChat()
+
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+      }
+    }
+  }, [router, startPolling])
 
   useEffect(() => {
-    // Save messages to localStorage
-    if (messages.length > 0) {
-      localStorage.setItem("chat_messages", JSON.stringify(messages))
-    }
     // Scroll to bottom
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
+
+  const startPolling = useCallback((sessionId: string, messageIds: string[]) => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current)
+    }
+
+    pollingIntervalRef.current = setInterval(async () => {
+      try {
+        const apiMessages = await apiClient.getChatMessages(sessionId)
+        const uiMessages: Message[] = apiMessages.map((msg: ChatMessage) => ({
+          id: msg.id,
+          role: msg.sender === "user" ? "user" : "assistant",
+          content: msg.content || "",
+          image: msg.image_file ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${msg.image_file}` : undefined,
+          timestamp: new Date(msg.timestamp),
+        }))
+        setMessages(uiMessages)
+
+        // Check if all messages are done processing
+        const stillProcessing = apiMessages.filter(
+          (msg: ChatMessage) => 
+            messageIds.includes(msg.id) && 
+            (msg.processing_status === "processing" || msg.processing_status === "pending")
+        )
+
+        if (stillProcessing.length === 0) {
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current)
+            pollingIntervalRef.current = null
+          }
+        }
+      } catch (error) {
+        console.error("Polling error:", error)
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current)
+          pollingIntervalRef.current = null
+        }
+      }
+    }, 2000) // Poll every 2 seconds
+  }, [])
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -89,42 +174,118 @@ export default function ChatPage() {
 
   const handleSend = async () => {
     if (!input.trim() && !selectedImage) return
+    if (!sessionId) return
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: "user",
-      content: input,
-      image: imagePreview || undefined,
-      timestamp: new Date(),
-    }
+    const content = input.trim()
+    const imageFile = selectedImage
 
-    setMessages((prev) => [...prev, userMessage])
+    // Clear input immediately for better UX
     setInput("")
     setSelectedImage(null)
     setImagePreview(null)
     setLoading(true)
 
-    // TODO: Replace with actual API call
-    // Simulating AI response
-    setTimeout(() => {
-      const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        content: imagePreview
-          ? "I've analyzed your chart. Based on the technical indicators visible, I can see several key patterns:\n\n• **Trend**: The chart shows a bullish trend with higher highs and higher lows\n• **Support Level**: Strong support around the $45,000 mark\n• **Resistance**: Key resistance at $52,000\n• **Volume**: Increasing volume suggests strong momentum\n\n**Recommendation**: Consider waiting for a pullback to the support level before entering a long position. Set stop-loss below $44,500 to manage risk.\n\nWould you like me to analyze any specific aspect in more detail?"
-          : "I'm here to help with your trading analysis. You can:\n\n• Upload a chart image for detailed technical analysis\n• Ask questions about trading strategies\n• Get insights on market trends\n• Learn about risk management\n\nWhat would you like to know?",
-        timestamp: new Date(),
+    try {
+      // Send message to API
+      const apiMessage = await apiClient.createChatMessage(
+        sessionId,
+        content,
+        imageFile || undefined
+      )
+
+      // Add user message to UI
+      const userMessage: Message = {
+        id: apiMessage.id,
+        role: "user",
+        content: apiMessage.content || "",
+        image: imageFile ? imagePreview || undefined : undefined,
+        timestamp: new Date(apiMessage.timestamp),
       }
-      setMessages((prev) => [...prev, aiMessage])
+      setMessages((prev) => [...prev, userMessage])
+
+      // Start polling for AI response
+      startPolling(sessionId, [apiMessage.id])
+
+      // Poll until we get the AI response
+      const checkForResponse = async () => {
+        try {
+          const apiMessages = await apiClient.getChatMessages(sessionId)
+          const aiResponse = apiMessages.find(
+            (msg: ChatMessage) => 
+              msg.sender === "ai" && 
+              new Date(msg.timestamp) > new Date(apiMessage.timestamp)
+          )
+
+          if (aiResponse) {
+            const aiMessage: Message = {
+              id: aiResponse.id,
+              role: "assistant",
+              content: aiResponse.content || "",
+              image: aiResponse.annotated_image 
+                ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${aiResponse.annotated_image}` 
+                : undefined,
+              timestamp: new Date(aiResponse.timestamp),
+            }
+            setMessages((prev) => {
+              // Avoid duplicates
+              if (prev.find(m => m.id === aiMessage.id)) {
+                return prev
+              }
+              return [...prev, aiMessage]
+            })
+            setLoading(false)
+          } else {
+            // Check status
+            const status = await apiClient.getMessageStatus(sessionId, apiMessage.id)
+            if (status.processing_status === "failed") {
+              setLoading(false)
+              alert(status.error_message || "Failed to process message")
+            } else if (status.processing_status === "completed" && status.has_ai_response) {
+              // Reload messages to get AI response
+              const updatedMessages = await apiClient.getChatMessages(sessionId)
+              const uiMessages: Message[] = updatedMessages.map((msg: ChatMessage) => ({
+                id: msg.id,
+                role: msg.sender === "user" ? "user" : "assistant",
+                content: msg.content || "",
+                image: msg.image_file 
+                  ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${msg.image_file}` 
+                  : msg.annotated_image 
+                  ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${msg.annotated_image}` 
+                  : undefined,
+                timestamp: new Date(msg.timestamp),
+              }))
+              setMessages(uiMessages)
+              setLoading(false)
+            } else {
+              // Continue polling
+              setTimeout(checkForResponse, 2000)
+            }
+          }
+        } catch (error) {
+          console.error("Error checking for response:", error)
+          setLoading(false)
+        }
+      }
+
+      // Start checking for response after a short delay
+      setTimeout(checkForResponse, 2000)
+    } catch (error) {
+      console.error("Failed to send message:", error)
       setLoading(false)
-    }, 1500)
+      alert(error instanceof Error ? error.message : "Failed to send message")
+    }
   }
 
-  const handleLogout = () => {
-    localStorage.removeItem("auth_token")
-    localStorage.removeItem("user_email")
-    localStorage.removeItem("chat_messages")
-    router.push("/")
+  const handleLogout = async () => {
+    try {
+      await apiClient.logout()
+    } catch (error) {
+      console.error("Logout error:", error)
+    } finally {
+      localStorage.removeItem("user_email")
+      localStorage.removeItem("user_username")
+      router.push("/")
+    }
   }
 
   return (
@@ -159,8 +320,16 @@ export default function ChatPage() {
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto">
         <div className="container mx-auto px-4 py-6 max-w-4xl">
-          <div className="space-y-6">
-            {messages.map((message) => (
+          {initializing ? (
+            <div className="flex items-center justify-center h-full">
+              <div className="flex items-center gap-2">
+                <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                <span className="text-muted-foreground">Loading chat...</span>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {messages.map((message) => (
               <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
                 <Card
                   className={`max-w-[80%] p-4 ${
@@ -187,19 +356,20 @@ export default function ChatPage() {
                   </p>
                 </Card>
               </div>
-            ))}
-            {loading && (
-              <div className="flex justify-start">
-                <Card className="p-4 bg-card border-border">
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                    <span className="text-sm text-muted-foreground">Analyzing...</span>
-                  </div>
-                </Card>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
+              ))}
+              {loading && (
+                <div className="flex justify-start">
+                  <Card className="p-4 bg-card border-border">
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                      <span className="text-sm text-muted-foreground">Analyzing...</span>
+                    </div>
+                  </Card>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
         </div>
       </div>
 

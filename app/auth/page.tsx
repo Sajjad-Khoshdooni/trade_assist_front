@@ -10,10 +10,12 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card } from "@/components/ui/card"
 import { TrendingUp } from "lucide-react"
+import { apiClient } from "@/lib/api"
 
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true)
   const [email, setEmail] = useState("")
+  const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [error, setError] = useState("")
@@ -21,21 +23,28 @@ export default function AuthPage() {
   const router = useRouter()
 
   const validateForm = () => {
-    if (!email || !password) {
-      setError("Please fill in all fields")
-      return false
-    }
-    if (!email.includes("@")) {
-      setError("Please enter a valid email address")
-      return false
-    }
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters")
-      return false
-    }
-    if (!isLogin && password !== confirmPassword) {
-      setError("Passwords do not match")
-      return false
+    if (isLogin) {
+      if (!username || !password) {
+        setError("Please fill in all fields")
+        return false
+      }
+    } else {
+      if (!username || !email || !password || !confirmPassword) {
+        setError("Please fill in all fields")
+        return false
+      }
+      if (!email.includes("@")) {
+        setError("Please enter a valid email address")
+        return false
+      }
+      if (password.length < 6) {
+        setError("Password must be at least 6 characters")
+        return false
+      }
+      if (password !== confirmPassword) {
+        setError("Passwords do not match")
+        return false
+      }
     }
     return true
   }
@@ -48,14 +57,22 @@ export default function AuthPage() {
 
     setLoading(true)
 
-    // TODO: Replace with actual API call
-    // Simulating API call
-    setTimeout(() => {
-      // Store mock auth token
-      localStorage.setItem("auth_token", "mock_token_" + Date.now())
-      localStorage.setItem("user_email", email)
-      router.push("/chat")
-    }, 1000)
+    try {
+      if (isLogin) {
+        const response = await apiClient.login(username, password)
+        localStorage.setItem("user_email", response.user.email)
+        localStorage.setItem("user_username", response.user.username)
+        router.push("/chat")
+      } else {
+        const response = await apiClient.register(username, email, password)
+        localStorage.setItem("user_email", response.user.email)
+        localStorage.setItem("user_username", response.user.username)
+        router.push("/chat")
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred")
+      setLoading(false)
+    }
   }
 
   return (
@@ -79,16 +96,30 @@ export default function AuthPage() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="username">Username</Label>
               <Input
-                id="email"
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="username"
+                type="text"
+                placeholder="your_username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
                 className="bg-background"
               />
             </div>
+
+            {!isLogin && (
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="bg-background"
+                />
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
@@ -134,6 +165,9 @@ export default function AuthPage() {
                 setIsLogin(!isLogin)
                 setError("")
                 setConfirmPassword("")
+                setEmail("")
+                setUsername("")
+                setPassword("")
               }}
               className="text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
