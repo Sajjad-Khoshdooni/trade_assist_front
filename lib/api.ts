@@ -12,7 +12,6 @@ export interface User {
 }
 
 export interface AuthResponse {
-  token: string;
   user: User;
 }
 
@@ -47,13 +46,9 @@ export interface ChatMessage {
 
 class ApiClient {
   private baseUrl: string;
-  private token: string | null = null;
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
-    if (typeof window !== 'undefined') {
-      this.token = localStorage.getItem('auth_token');
-    }
   }
 
   private async request<T>(
@@ -61,19 +56,20 @@ class ApiClient {
     options: RequestInit = {}
   ): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    };
-
-    if (this.token) {
-      headers['Authorization'] = `Token ${this.token}`;
-    }
+    
+    // Don't set Content-Type for FormData (browser will set it with boundary)
+    const isFormData = options.body instanceof FormData;
+    const headers: HeadersInit = isFormData
+      ? { ...options.headers }
+      : {
+          'Content-Type': 'application/json',
+          ...options.headers,
+        };
 
     const response = await fetch(url, {
       ...options,
       headers,
-      credentials: 'include',
+      credentials: 'include', // Important: sends cookies with request
     });
 
     if (!response.ok) {
@@ -87,30 +83,24 @@ class ApiClient {
   }
 
   // Auth methods
+  // JWT tokens are automatically stored in HTTP-only cookies by the backend
   async register(username: string, email: string, password: string): Promise<AuthResponse> {
-    const response = await this.request<AuthResponse>('/auth/register/', {
+    return this.request<AuthResponse>('/auth/register/', {
       method: 'POST',
       body: JSON.stringify({ username, email, password }),
     });
-    this.setToken(response.token);
-    return response;
   }
 
   async login(username: string, password: string): Promise<AuthResponse> {
-    const response = await this.request<AuthResponse>('/auth/login/', {
+    return this.request<AuthResponse>('/auth/login/', {
       method: 'POST',
       body: JSON.stringify({ username, password }),
     });
-    this.setToken(response.token);
-    return response;
   }
 
   async logout(): Promise<void> {
-    try {
-      await this.request('/auth/logout/', { method: 'POST' });
-    } finally {
-      this.clearToken();
-    }
+    await this.request('/auth/logout/', { method: 'POST' });
+    // Cookies are automatically cleared by the backend response
   }
 
   async getUserInfo(): Promise<{ user: User }> {
@@ -151,28 +141,11 @@ class ApiClient {
       formData.append('image_file', imageFile);
     }
 
-    const url = `${this.baseUrl}/chat/sessions/${sessionId}/messages/create/`;
-    const headers: HeadersInit = {};
-    
-    if (this.token) {
-      headers['Authorization'] = `Token ${this.token}`;
-    }
-
-    const response = await fetch(url, {
+    // Use the request method which handles cookies automatically
+    return this.request<ChatMessage>(`/chat/sessions/${sessionId}/messages/create/`, {
       method: 'POST',
-      headers,
       body: formData,
-      credentials: 'include',
     });
-
-    if (!response.ok) {
-      const error: ApiError = await response.json().catch(() => ({
-        error: `HTTP ${response.status}: ${response.statusText}`,
-      }));
-      throw new Error(error.error || error.message || 'Request failed');
-    }
-
-    return response.json();
   }
 
   async getMessageStatus(sessionId: string, messageId: string): Promise<{
@@ -182,25 +155,6 @@ class ApiClient {
     has_ai_response: boolean;
   }> {
     return this.request(`/chat/sessions/${sessionId}/messages/${messageId}/status/`);
-  }
-
-  // Token management
-  setToken(token: string): void {
-    this.token = token;
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('auth_token', token);
-    }
-  }
-
-  clearToken(): void {
-    this.token = null;
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('auth_token');
-    }
-  }
-
-  getToken(): string | null {
-    return this.token;
   }
 }
 

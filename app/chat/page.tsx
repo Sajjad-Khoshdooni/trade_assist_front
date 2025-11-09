@@ -34,19 +34,20 @@ export default function ChatPage() {
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
-    // Check authentication
-    const token = apiClient.getToken()
-    const email = localStorage.getItem("user_email")
-    if (!token) {
-      router.push("/auth")
-      return
-    }
-    setUserEmail(email || "User")
-
     // Initialize chat session and load messages
     const initializeChat = async () => {
       try {
         setInitializing(true)
+        
+        // Check authentication by getting user info
+        try {
+          const userInfo = await apiClient.getUserInfo()
+          setUserEmail(userInfo.user.email || userInfo.user.username)
+        } catch (error) {
+          // Not authenticated, redirect to login
+          router.push("/auth")
+          return
+        }
         // Get or create a chat session
         const sessions = await apiClient.getChatSessions()
         let session = sessions.length > 0 ? sessions[0] : null
