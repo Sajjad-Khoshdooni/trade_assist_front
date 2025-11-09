@@ -15,7 +15,7 @@ export interface AuthResponse {
   user: User;
 }
 
-export interface ChatSession {
+export interface Conversation {
   id: string;
   user: number;
   created_at: string;
@@ -24,11 +24,12 @@ export interface ChatSession {
   title?: string;
   message_count?: number;
   last_message_time?: string;
+  last_message_preview?: string;
 }
 
 export interface ChatMessage {
   id: string;
-  session: string;
+  conversation: string;
   sender: 'user' | 'ai';
   message_type: 'text' | 'image' | 'text_image';
   content: string;
@@ -107,29 +108,45 @@ class ApiClient {
     return this.request<{ user: User }>('/auth/user/');
   }
 
-  // Chat session methods
-  async getChatSessions(): Promise<ChatSession[]> {
-    const response = await this.request<{ results?: ChatSession[] }>('/chat/sessions/');
+  // Conversation methods
+  async getConversations(): Promise<Conversation[]> {
+    const response = await this.request<{ results?: Conversation[] }>('/conversations/');
     return response.results || (Array.isArray(response) ? response : []);
   }
 
-  async createChatSession(title?: string): Promise<ChatSession> {
-    return this.request<ChatSession>('/chat/sessions/', {
+  async createConversation(title?: string): Promise<Conversation> {
+    return this.request<Conversation>('/conversations/', {
       method: 'POST',
       body: JSON.stringify({ title }),
     });
   }
 
-  async getChatSession(sessionId: string): Promise<ChatSession> {
-    return this.request<ChatSession>(`/chat/sessions/${sessionId}/`);
+  async getConversation(conversationId: string): Promise<Conversation> {
+    return this.request<Conversation>(`/conversations/${conversationId}/`);
   }
 
-  async getChatMessages(sessionId: string): Promise<ChatMessage[]> {
-    return this.request<ChatMessage[]>(`/chat/sessions/${sessionId}/messages/`);
+  async updateConversation(conversationId: string, title?: string, status?: string): Promise<Conversation> {
+    const body: any = {};
+    if (title !== undefined) body.title = title;
+    if (status !== undefined) body.status = status;
+    return this.request<Conversation>(`/conversations/${conversationId}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async deleteConversation(conversationId: string): Promise<void> {
+    return this.request(`/conversations/${conversationId}/`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getConversationMessages(conversationId: string): Promise<ChatMessage[]> {
+    return this.request<ChatMessage[]>(`/conversations/${conversationId}/messages/`);
   }
 
   async createChatMessage(
-    sessionId: string,
+    conversationId: string,
     content: string,
     imageFile?: File
   ): Promise<ChatMessage> {
@@ -142,19 +159,19 @@ class ApiClient {
     }
 
     // Use the request method which handles cookies automatically
-    return this.request<ChatMessage>(`/chat/sessions/${sessionId}/messages/create/`, {
+    return this.request<ChatMessage>(`/conversations/${conversationId}/messages/create/`, {
       method: 'POST',
       body: formData,
     });
   }
 
-  async getMessageStatus(sessionId: string, messageId: string): Promise<{
+  async getMessageStatus(conversationId: string, messageId: string): Promise<{
     message_id: string;
     processing_status: string;
     error_message?: string;
     has_ai_response: boolean;
   }> {
-    return this.request(`/chat/sessions/${sessionId}/messages/${messageId}/status/`);
+    return this.request(`/conversations/${conversationId}/messages/${messageId}/status/`);
   }
 }
 

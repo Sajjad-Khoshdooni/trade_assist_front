@@ -7,9 +7,9 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
-import { TrendingUp, Send, ImageIcon, LogOut, Loader2 } from "lucide-react"
+import { TrendingUp, Send, ImageIcon, LogOut, Loader2, Plus, MessageSquare } from "lucide-react"
 import Link from "next/link"
-import { apiClient, ChatMessage } from "@/lib/api"
+import { apiClient, ChatMessage, Conversation } from "@/lib/api"
 
 interface Message {
   id: string
@@ -20,21 +20,23 @@ interface Message {
 }
 
 export default function ChatPage() {
+  const [conversations, setConversations] = useState<Conversation[]>([])
+  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [selectedImage, setSelectedImage] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [userEmail, setUserEmail] = useState("")
-  const [sessionId, setSessionId] = useState<string | null>(null)
   const [initializing, setInitializing] = useState(true)
+  const [creatingConversation, setCreatingConversation] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
-    // Initialize chat session and load messages
+    // Initialize conversations and load user info
     const initializeChat = async () => {
       try {
         setInitializing(true)
@@ -48,21 +50,20 @@ export default function ChatPage() {
           router.push("/auth")
           return
         }
-        // Get or create a chat session
-        const sessions = await apiClient.getChatSessions()
-        let session = sessions.length > 0 ? sessions[0] : null
-        
-        if (!session) {
-          session = await apiClient.createChatSession("Main Chat")
-        }
-        
-        setSessionId(session.id)
-        
-        // Load messages
-        const apiMessages = await apiClient.getChatMessages(session.id)
-        
-        if (apiMessages.length === 0) {
-          // Welcome message
+
+        // Load conversations
+        const loadedConversations = await apiClient.getConversations()
+        setConversations(loadedConversations)
+
+        // Select first conversation or create new one
+        if (loadedConversations.length > 0) {
+          setSelectedConversation(loadedConversations[0])
+          await loadConversationMessages(loadedConversations[0].id)
+        } else {
+          // Create a default conversation
+          const newConversation = await apiClient.createConversation("New Conversation")
+          setConversations([newConversation])
+          setSelectedConversation(newConversation)
           setMessages([
             {
               id: "welcome",
@@ -72,26 +73,6 @@ export default function ChatPage() {
               timestamp: new Date(),
             },
           ])
-        } else {
-          // Convert API messages to UI format
-          const uiMessages: Message[] = apiMessages.map((msg: ChatMessage) => ({
-            id: msg.id,
-            role: msg.sender === "user" ? "user" : "assistant",
-            content: msg.content || "",
-            image: msg.image_file ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${msg.image_file}` : undefined,
-            timestamp: new Date(msg.timestamp),
-          }))
-          setMessages(uiMessages)
-          
-          // Check if any messages are still processing
-          const processingMessages = apiMessages.filter(
-            (msg: ChatMessage) => msg.processing_status === "processing" || msg.processing_status === "pending"
-          )
-          
-          if (processingMessages.length > 0) {
-            // Start polling for updates
-            startPolling(session.id, processingMessages.map((m: ChatMessage) => m.id))
-          }
         }
       } catch (error) {
         console.error("Failed to initialize chat:", error)
@@ -110,26 +91,101 @@ export default function ChatPage() {
         clearInterval(pollingIntervalRef.current)
       }
     }
-  }, [router, startPolling])
+  }, [router])
 
   useEffect(() => {
     // Scroll to bottom
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
-  const startPolling = useCallback((sessionId: string, messageIds: string[]) => {
+  const loadConversationMessages = async (conversationId: string) => {
+    try {
+      const apiMessages = await apiClient.getConversationMessages(conversationId)
+      
+      if (apiMessages.length === 0) {
+        setMessages([
+          {
+            id: "welcome",
+            role: "assistant",
+            content:
+              "Hello! I'm your AI trading assistant. Upload a chart image or ask me anything about trading analysis.",
+            timestamp: new Date(),
+          },
+        ])
+      } else {
+        // Convert API messages to UI format
+        const uiMessages: Message[] = apiMessages.map((msg: ChatMessage) => ({
+          id: msg.id,
+          role: msg.sender === "user" ? "user" : "assistant",
+          content: msg.content || "",
+          image: msg.image_file 
+            ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${msg.image_file}` 
+            : msg.annotated_image 
+            ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${msg.annotated_image}` 
+            : undefined,
+          timestamp: new Date(msg.timestamp),
+        }))
+        setMessages(uiMessages)
+        
+        // Check if any messages are still processing
+        const processingMessages = apiMessages.filter(
+          (msg: ChatMessage) => msg.processing_status === "processing" || msg.processing_status === "pending"
+        )
+        
+        if (processingMessages.length > 0) {
+          // Start polling for updates
+          startPolling(conversationId, processingMessages.map((m: ChatMessage) => m.id))
+        }
+      }
+    } catch (error) {
+      console.error("Failed to load messages:", error)
+    }
+  }
+
+  const handleConversationSelect = async (conversation: Conversation) => {
+    setSelectedConversation(conversation)
+    await loadConversationMessages(conversation.id)
+  }
+
+  const handleCreateConversation = async () => {
+    try {
+      setCreatingConversation(true)
+      const newConversation = await apiClient.createConversation("New Conversation")
+      setConversations([...conversations, newConversation])
+      setSelectedConversation(newConversation)
+      setMessages([
+        {
+          id: "welcome",
+          role: "assistant",
+          content:
+            "Hello! I'm your AI trading assistant. Upload a chart image or ask me anything about trading analysis.",
+          timestamp: new Date(),
+        },
+      ])
+    } catch (error) {
+      console.error("Failed to create conversation:", error)
+    } finally {
+      setCreatingConversation(false)
+    }
+  }
+
+  const startPolling = useCallback((conversationId: string, messageIds: string[]) => {
     if (pollingIntervalRef.current) {
       clearInterval(pollingIntervalRef.current)
     }
 
     pollingIntervalRef.current = setInterval(async () => {
       try {
-        const apiMessages = await apiClient.getChatMessages(sessionId)
+        const apiMessages = await apiClient.getConversationMessages(conversationId)
         const uiMessages: Message[] = apiMessages.map((msg: ChatMessage) => ({
           id: msg.id,
           role: msg.sender === "user" ? "user" : "assistant",
           content: msg.content || "",
-          image: msg.image_file ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${msg.image_file}` : undefined,
+          image: msg.image_file 
+            ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${msg.image_file}` 
+            : msg.annotated_image 
+            ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${msg.annotated_image}` 
+            : undefined,
           timestamp: new Date(msg.timestamp),
         }))
         setMessages(uiMessages)
@@ -175,7 +231,7 @@ export default function ChatPage() {
 
   const handleSend = async () => {
     if (!input.trim() && !selectedImage) return
-    if (!sessionId) return
+    if (!selectedConversation) return
 
     const content = input.trim()
     const imageFile = selectedImage
@@ -189,7 +245,7 @@ export default function ChatPage() {
     try {
       // Send message to API
       const apiMessage = await apiClient.createChatMessage(
-        sessionId,
+        selectedConversation.id,
         content,
         imageFile || undefined
       )
@@ -205,12 +261,12 @@ export default function ChatPage() {
       setMessages((prev) => [...prev, userMessage])
 
       // Start polling for AI response
-      startPolling(sessionId, [apiMessage.id])
+      startPolling(selectedConversation.id, [apiMessage.id])
 
       // Poll until we get the AI response
       const checkForResponse = async () => {
         try {
-          const apiMessages = await apiClient.getChatMessages(sessionId)
+          const apiMessages = await apiClient.getConversationMessages(selectedConversation.id)
           const aiResponse = apiMessages.find(
             (msg: ChatMessage) => 
               msg.sender === "ai" && 
@@ -237,13 +293,13 @@ export default function ChatPage() {
             setLoading(false)
           } else {
             // Check status
-            const status = await apiClient.getMessageStatus(sessionId, apiMessage.id)
+            const status = await apiClient.getMessageStatus(selectedConversation.id, apiMessage.id)
             if (status.processing_status === "failed") {
               setLoading(false)
               alert(status.error_message || "Failed to process message")
             } else if (status.processing_status === "completed" && status.has_ai_response) {
               // Reload messages to get AI response
-              const updatedMessages = await apiClient.getChatMessages(sessionId)
+              const updatedMessages = await apiClient.getConversationMessages(selectedConversation.id)
               const uiMessages: Message[] = updatedMessages.map((msg: ChatMessage) => ({
                 id: msg.id,
                 role: msg.sender === "user" ? "user" : "assistant",
@@ -318,9 +374,70 @@ export default function ChatPage() {
         </div>
       </header>
 
-      {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="container mx-auto px-4 py-6 max-w-4xl">
+      {/* Main Content */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Conversations Sidebar */}
+        <div className="w-64 border-r border-border bg-card flex flex-col">
+          <div className="p-4 border-b border-border">
+            <Button
+              onClick={handleCreateConversation}
+              className="w-full"
+              disabled={creatingConversation}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              New Conversation
+            </Button>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {initializing ? (
+              <div className="p-4 flex items-center justify-center">
+                <Loader2 className="w-5 h-5 animate-spin text-primary" />
+              </div>
+            ) : (
+              <div className="p-2">
+                {conversations.map((conversation) => (
+                  <button
+                    key={conversation.id}
+                    onClick={() => handleConversationSelect(conversation)}
+                    className={`w-full text-left p-3 rounded-lg mb-2 transition-colors ${
+                      selectedConversation?.id === conversation.id
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-background hover:bg-muted"
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      <MessageSquare className="w-4 h-4 mt-1 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm truncate">
+                          {conversation.title || "Untitled Conversation"}
+                        </p>
+                        {conversation.last_message_preview && (
+                          <p className={`text-xs mt-1 truncate ${
+                            selectedConversation?.id === conversation.id
+                              ? "text-primary-foreground/70"
+                              : "text-muted-foreground"
+                          }`}>
+                            {conversation.last_message_preview}
+                          </p>
+                        )}
+                        <p className={`text-xs mt-1 ${
+                          selectedConversation?.id === conversation.id
+                            ? "text-primary-foreground/50"
+                            : "text-muted-foreground"
+                        }`}>
+                          {conversation.message_count || 0} messages
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Messages Area */}
+        <div className="flex-1 flex flex-col overflow-hidden">
           {initializing ? (
             <div className="flex items-center justify-center h-full">
               <div className="flex items-center gap-2">
@@ -329,95 +446,101 @@ export default function ChatPage() {
               </div>
             </div>
           ) : (
-            <div className="space-y-6">
-              {messages.map((message) => (
-              <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
-                <Card
-                  className={`max-w-[80%] p-4 ${
-                    message.role === "user" ? "bg-primary text-primary-foreground" : "bg-card border-border"
-                  }`}
-                >
-                  {message.image && (
-                    <img
-                      src={message.image || "/placeholder.svg"}
-                      alt="Chart"
-                      className="rounded-lg mb-3 max-w-full h-auto"
-                    />
-                  )}
-                  <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
-                  <p
-                    className={`text-xs mt-2 ${
-                      message.role === "user" ? "text-primary-foreground/70" : "text-muted-foreground"
-                    }`}
-                  >
-                    {message.timestamp.toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </p>
-                </Card>
-              </div>
-              ))}
-              {loading && (
-                <div className="flex justify-start">
-                  <Card className="p-4 bg-card border-border">
-                    <div className="flex items-center gap-2">
-                      <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                      <span className="text-sm text-muted-foreground">Analyzing...</span>
-                    </div>
-                  </Card>
+            <>
+              <div className="flex-1 overflow-y-auto">
+                <div className="container mx-auto px-4 py-6 max-w-4xl">
+                  <div className="space-y-6">
+                    {messages.map((message) => (
+                      <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+                        <Card
+                          className={`max-w-[80%] p-4 ${
+                            message.role === "user" ? "bg-primary text-primary-foreground" : "bg-card border-border"
+                          }`}
+                        >
+                          {message.image && (
+                            <img
+                              src={message.image || "/placeholder.svg"}
+                              alt="Chart"
+                              className="rounded-lg mb-3 max-w-full h-auto"
+                            />
+                          )}
+                          <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                          <p
+                            className={`text-xs mt-2 ${
+                              message.role === "user" ? "text-primary-foreground/70" : "text-muted-foreground"
+                            }`}
+                          >
+                            {message.timestamp.toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </p>
+                        </Card>
+                      </div>
+                    ))}
+                    {loading && (
+                      <div className="flex justify-start">
+                        <Card className="p-4 bg-card border-border">
+                          <div className="flex items-center gap-2">
+                            <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                            <span className="text-sm text-muted-foreground">Analyzing...</span>
+                          </div>
+                        </Card>
+                      </div>
+                    )}
+                    <div ref={messagesEndRef} />
+                  </div>
                 </div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </div>
-      </div>
+              </div>
 
-      {/* Input Area */}
-      <div className="border-t border-border bg-card">
-        <div className="container mx-auto px-4 py-4 max-w-4xl">
-          {imagePreview && (
-            <div className="mb-3 relative inline-block">
-              <img
-                src={imagePreview || "/placeholder.svg"}
-                alt="Preview"
-                className="h-20 rounded-lg border border-border"
-              />
-              <button
-                onClick={() => {
-                  setSelectedImage(null)
-                  setImagePreview(null)
-                }}
-                className="absolute -top-2 -right-2 w-6 h-6 bg-destructive rounded-full flex items-center justify-center text-destructive-foreground text-xs"
-              >
-                ×
-              </button>
-            </div>
+              {/* Input Area */}
+              <div className="border-t border-border bg-card">
+                <div className="container mx-auto px-4 py-4 max-w-4xl">
+                  {imagePreview && (
+                    <div className="mb-3 relative inline-block">
+                      <img
+                        src={imagePreview || "/placeholder.svg"}
+                        alt="Preview"
+                        className="h-20 rounded-lg border border-border"
+                      />
+                      <button
+                        onClick={() => {
+                          setSelectedImage(null)
+                          setImagePreview(null)
+                        }}
+                        className="absolute -top-2 -right-2 w-6 h-6 bg-destructive rounded-full flex items-center justify-center text-destructive-foreground text-xs"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
+                    <Button variant="outline" size="icon" onClick={() => fileInputRef.current?.click()} disabled={loading}>
+                      <ImageIcon className="w-4 h-4" />
+                    </Button>
+                    <Input
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault()
+                          handleSend()
+                        }
+                      }}
+                      placeholder="Ask about chart analysis or upload an image..."
+                      className="flex-1 bg-background"
+                      disabled={loading}
+                    />
+                    <Button onClick={handleSend} disabled={loading || (!input.trim() && !selectedImage)}>
+                      <Send className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">Upload chart images (.png, .jpg) for AI-powered analysis</p>
+                </div>
+              </div>
+            </>
           )}
-          <div className="flex gap-2">
-            <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
-            <Button variant="outline" size="icon" onClick={() => fileInputRef.current?.click()} disabled={loading}>
-              <ImageIcon className="w-4 h-4" />
-            </Button>
-            <Input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault()
-                  handleSend()
-                }
-              }}
-              placeholder="Ask about chart analysis or upload an image..."
-              className="flex-1 bg-background"
-              disabled={loading}
-            />
-            <Button onClick={handleSend} disabled={loading || (!input.trim() && !selectedImage)}>
-              <Send className="w-4 h-4" />
-            </Button>
-          </div>
-          <p className="text-xs text-muted-foreground mt-2">Upload chart images (.png, .jpg) for AI-powered analysis</p>
         </div>
       </div>
     </div>
