@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { TrendingUp, LogOut, TrendingDown, Minus, ExternalLink, Clock } from "lucide-react"
+import { apiClient } from "@/lib/api"
 
 interface NewsItem {
   id: string
@@ -106,21 +107,29 @@ export default function NewsPage() {
   const router = useRouter()
 
   useEffect(() => {
-    // Check authentication
-    const token = localStorage.getItem("auth_token")
-    const email = localStorage.getItem("user_email")
-    if (!token) {
-      router.push("/auth")
-      return
+    // Check authentication by getting user info (uses HTTP-only cookies)
+    const checkAuth = async () => {
+      try {
+        const userInfo = await apiClient.getUserInfo()
+        setUserEmail(userInfo.user.email || userInfo.user.username)
+      } catch (error) {
+        // Not authenticated, redirect to login
+        router.push("/auth")
+      }
     }
-    setUserEmail(email || "User")
+    checkAuth()
   }, [router])
 
-  const handleLogout = () => {
-    localStorage.removeItem("auth_token")
-    localStorage.removeItem("user_email")
-    localStorage.removeItem("chat_messages")
-    router.push("/")
+  const handleLogout = async () => {
+    try {
+      await apiClient.logout()
+    } catch (error) {
+      console.error("Logout error:", error)
+    } finally {
+      localStorage.removeItem("user_email")
+      localStorage.removeItem("user_username")
+      router.push("/")
+    }
   }
 
   const filteredNews =

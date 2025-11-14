@@ -395,9 +395,9 @@ export default function ChatPage() {
               </div>
             ) : (
               <div className="p-2">
-                {conversations.map((conversation) => (
+                {conversations.map((conversation, index) => (
                   <button
-                    key={conversation.id}
+                    key={conversation.id || `conversation-${index}`}
                     onClick={() => handleConversationSelect(conversation)}
                     className={`w-full text-left p-3 rounded-lg mb-2 transition-colors ${
                       selectedConversation?.id === conversation.id
