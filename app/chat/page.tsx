@@ -66,7 +66,7 @@ export default function ChatPage() {
           setSelectedConversation(newConversation)
           setMessages([
             {
-              id: "welcome",
+              id: `welcome-${Date.now()}`,
               role: "assistant",
               content:
                 "Hello! I'm your AI trading assistant. Upload a chart image or ask me anything about trading analysis.",
@@ -105,7 +105,7 @@ export default function ChatPage() {
       if (apiMessages.length === 0) {
         setMessages([
           {
-            id: "welcome",
+            id: `welcome-${Date.now()}`,
             role: "assistant",
             content:
               "Hello! I'm your AI trading assistant. Upload a chart image or ask me anything about trading analysis.",
@@ -155,7 +155,7 @@ export default function ChatPage() {
       setSelectedConversation(newConversation)
       setMessages([
         {
-          id: "welcome",
+          id: `welcome-${Date.now()}`,
           role: "assistant",
           content:
             "Hello! I'm your AI trading assistant. Upload a chart image or ask me anything about trading analysis.",
@@ -293,29 +293,39 @@ export default function ChatPage() {
             setLoading(false)
           } else {
             // Check status
-            const status = await apiClient.getMessageStatus(selectedConversation.id, apiMessage.id)
-            if (status.processing_status === "failed") {
-              setLoading(false)
-              alert(status.error_message || "Failed to process message")
-            } else if (status.processing_status === "completed" && status.has_ai_response) {
-              // Reload messages to get AI response
-              const updatedMessages = await apiClient.getConversationMessages(selectedConversation.id)
-              const uiMessages: Message[] = updatedMessages.map((msg: ChatMessage) => ({
-                id: msg.id,
-                role: msg.sender === "user" ? "user" : "assistant",
-                content: msg.content || "",
-                image: msg.image_file 
-                  ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${msg.image_file}` 
-                  : msg.annotated_image 
-                  ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${msg.annotated_image}` 
-                  : undefined,
-                timestamp: new Date(msg.timestamp),
-              }))
-              setMessages(uiMessages)
-              setLoading(false)
-            } else {
-              // Continue polling
-              setTimeout(checkForResponse, 2000)
+            try {
+              const status = await apiClient.getMessageStatus(selectedConversation.id, apiMessage.id)
+              if (status.processing_status === "failed") {
+                setLoading(false)
+                alert(status.error_message || "Failed to process message")
+              } else if (status.processing_status === "completed" && status.has_ai_response) {
+                // Reload messages to get AI response
+                const updatedMessages = await apiClient.getConversationMessages(selectedConversation.id)
+                const uiMessages: Message[] = updatedMessages.map((msg: ChatMessage) => ({
+                  id: msg.id,
+                  role: msg.sender === "user" ? "user" : "assistant",
+                  content: msg.content || "",
+                  image: msg.image_file 
+                    ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${msg.image_file}` 
+                    : msg.annotated_image 
+                    ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${msg.annotated_image}` 
+                    : undefined,
+                  timestamp: new Date(msg.timestamp),
+                }))
+                setMessages(uiMessages)
+                setLoading(false)
+              } else {
+                // Continue polling
+                setTimeout(checkForResponse, 2000)
+              }
+            } catch (error) {
+              // Message might not exist yet (404), continue polling
+              if (error instanceof Error && error.message.includes("404")) {
+                setTimeout(checkForResponse, 2000)
+              } else {
+                console.error("Error checking message status:", error)
+                setLoading(false)
+              }
             }
           }
         } catch (error) {
@@ -450,8 +460,8 @@ export default function ChatPage() {
               <div className="flex-1 overflow-y-auto">
                 <div className="container mx-auto px-4 py-6 max-w-4xl">
                   <div className="space-y-6">
-                    {messages.map((message) => (
-                      <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+                    {messages.map((message, index) => (
+                      <div key={message.id || `message-${index}`} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
                         <Card
                           className={`max-w-[80%] p-4 ${
                             message.role === "user" ? "bg-primary text-primary-foreground" : "bg-card border-border"

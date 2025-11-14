@@ -45,6 +45,20 @@ export interface ChatMessage {
   error_message?: string;
 }
 
+export interface NewsItem {
+  id: string;
+  title: string;
+  source: string;
+  summary: string;
+  category: 'bullish' | 'bearish' | 'neutral';
+  impact: 'high' | 'medium' | 'low';
+  url?: string;
+  ai_analysis?: string;
+  published_at: string;
+  timestamp: string;
+  created_at: string;
+}
+
 class ApiClient {
   private baseUrl: string;
 
@@ -56,7 +70,9 @@ class ApiClient {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
-    const url = `${this.baseUrl}${endpoint}`;
+    // Ensure endpoint starts with /
+    const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+    const url = `${this.baseUrl}${normalizedEndpoint}`;
     
     // Don't set Content-Type for FormData (browser will set it with boundary)
     const isFormData = options.body instanceof FormData;
@@ -77,7 +93,10 @@ class ApiClient {
       const error: ApiError = await response.json().catch(() => ({
         error: `HTTP ${response.status}: ${response.statusText}`,
       }));
-      throw new Error(error.error || error.message || 'Request failed');
+      // Include URL in error for debugging
+      const errorMessage = error.error || error.message || 'Request failed';
+      console.error(`API Error [${response.status}]: ${errorMessage}`, { url, endpoint: normalizedEndpoint });
+      throw new Error(`${errorMessage} (${url})`);
     }
 
     return response.json();
@@ -172,6 +191,16 @@ class ApiClient {
     has_ai_response: boolean;
   }> {
     return this.request(`/conversations/${conversationId}/messages/${messageId}/status/`);
+  }
+
+  // News methods
+  async getNews(category?: 'bullish' | 'bearish' | 'neutral'): Promise<NewsItem[]> {
+    const params = category ? `?category=${category}` : '';
+    const response = this.request<NewsItem[] | { results?: NewsItem[] }>(`/news/${params}`);
+    return response.then(data => {
+      if (Array.isArray(data)) return data;
+      return (data as { results?: NewsItem[] }).results || [];
+    });
   }
 }
 
