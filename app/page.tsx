@@ -1,9 +1,47 @@
+"use client"
+
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { ArrowRight, BarChart3, Brain, Zap, TrendingUp, Shield, Clock } from "lucide-react"
+import { ArrowRight, BarChart3, Brain, Zap, TrendingUp, Shield, Clock, LogOut } from "lucide-react"
+import { apiClient } from "@/lib/api"
 
 export default function LandingPage() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [userEmail, setUserEmail] = useState("")
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    // Check authentication by getting user info
+    const checkAuth = async () => {
+      try {
+        const userInfo = await apiClient.getUserInfo()
+        setUserEmail(userInfo.user.email || userInfo.user.username)
+        setIsAuthenticated(true)
+      } catch (error) {
+        // Not authenticated
+        setIsAuthenticated(false)
+      } finally {
+        setLoading(false)
+      }
+    }
+    checkAuth()
+  }, [])
+
+  const handleLogout = async () => {
+    try {
+      await apiClient.logout()
+    } catch (error) {
+      console.error("Logout error:", error)
+    } finally {
+      localStorage.removeItem("user_email")
+      localStorage.removeItem("user_username")
+      setIsAuthenticated(false)
+      setUserEmail("")
+    }
+  }
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -15,26 +53,75 @@ export default function LandingPage() {
             </div>
             <span className="text-xl font-bold text-foreground">TradeAI</span>
           </div>
-          <nav className="hidden md:flex items-center gap-6">
-            <Link href="#features" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              Features
-            </Link>
-            <Link
-              href="#how-it-works"
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              How It Works
-            </Link>
-            <Link href="/news" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              News
-            </Link>
-            <Link href="/auth" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              Login
-            </Link>
-            <Button asChild>
-              <Link href="/auth">Get Started</Link>
-            </Button>
-          </nav>
+          <div className="flex items-center gap-2 sm:gap-4">
+            {/* Mobile Navigation - Chat and News */}
+            {!loading && isAuthenticated && (
+              <nav className="flex items-center gap-2 sm:gap-4 md:hidden">
+                <Link href="/chat" className="text-sm text-foreground font-semibold min-w-[3.5rem] text-center">
+                  Chat
+                </Link>
+                <Link href="/news" className="text-sm text-muted-foreground hover:text-foreground transition-colors font-semibold min-w-[3.5rem] text-center">
+                  News
+                </Link>
+              </nav>
+            )}
+            {/* Desktop Navigation */}
+            <nav className="hidden md:flex items-center gap-6">
+              <Link href="#features" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+                Features
+              </Link>
+              <Link
+                href="#how-it-works"
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                How It Works
+              </Link>
+              <Link href="/news" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+                News
+              </Link>
+              {!loading && (
+                <>
+                  {isAuthenticated ? (
+                    <>
+                      <Link href="/chat" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+                        Chat
+                      </Link>
+                      <span className="text-sm text-muted-foreground">{userEmail}</span>
+                      <Button variant="ghost" size="sm" onClick={handleLogout}>
+                        <LogOut className="w-4 h-4 mr-2" />
+                        Logout
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Link href="/auth" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+                        Login
+                      </Link>
+                      <Button asChild>
+                        <Link href="/auth">Get Started</Link>
+                      </Button>
+                    </>
+                  )}
+                </>
+              )}
+            </nav>
+            {/* Mobile Auth Buttons */}
+            {!loading && isAuthenticated && (
+              <div className="flex items-center gap-2 md:hidden">
+                <Button variant="ghost" size="sm" onClick={handleLogout}>
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Logout
+                </Button>
+              </div>
+            )}
+            {!loading && !isAuthenticated && (
+              <div className="flex items-center gap-2 md:hidden">
+                <Button asChild size="sm">
+                  <Link href="/auth">Login</Link>
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -53,11 +140,23 @@ export default function LandingPage() {
             recommendations. The future of trading intelligence is here.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <Button asChild size="lg" className="w-full sm:w-auto">
-              <Link href="/auth">
-                Get Started <ArrowRight className="ml-2 w-4 h-4" />
-              </Link>
-            </Button>
+            {!loading && (
+              <>
+                {isAuthenticated ? (
+                  <Button asChild size="lg" className="w-full sm:w-auto">
+                    <Link href="/chat">
+                      Go to Chat <ArrowRight className="ml-2 w-4 h-4" />
+                    </Link>
+                  </Button>
+                ) : (
+                  <Button asChild size="lg" className="w-full sm:w-auto">
+                    <Link href="/auth">
+                      Get Started <ArrowRight className="ml-2 w-4 h-4" />
+                    </Link>
+                  </Button>
+                )}
+              </>
+            )}
             <Button asChild variant="outline" size="lg" className="w-full sm:w-auto bg-transparent">
               <Link href="#features">Learn More</Link>
             </Button>
@@ -187,11 +286,23 @@ export default function LandingPage() {
           <p className="text-muted-foreground text-lg mb-8">
             Join traders who are already using AI to make smarter decisions
           </p>
-          <Button asChild size="lg">
-            <Link href="/auth">
-              Get Started Free <ArrowRight className="ml-2 w-4 h-4" />
-            </Link>
-          </Button>
+          {!loading && (
+            <>
+              {isAuthenticated ? (
+                <Button asChild size="lg">
+                  <Link href="/chat">
+                    Go to Chat <ArrowRight className="ml-2 w-4 h-4" />
+                  </Link>
+                </Button>
+              ) : (
+                <Button asChild size="lg">
+                  <Link href="/auth">
+                    Get Started Free <ArrowRight className="ml-2 w-4 h-4" />
+                  </Link>
+                </Button>
+              )}
+            </>
+          )}
         </div>
       </section>
 

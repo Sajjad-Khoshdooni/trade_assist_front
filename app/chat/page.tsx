@@ -763,6 +763,8 @@ export default function ChatPage() {
               </div>
               <span className="text-xl font-bold text-foreground hidden sm:inline">TradeAI</span>
             </Link>
+          </div>
+          <div className="flex items-center gap-2 sm:gap-4">
             <nav className="flex items-center gap-2 sm:gap-4">
               <Link href="/chat" className="text-sm text-foreground font-semibold min-w-[3.5rem] text-center">
                 Chat
@@ -771,8 +773,6 @@ export default function ChatPage() {
                 News
               </Link>
             </nav>
-          </div>
-          <div className="flex items-center gap-4">
             <span className="text-sm text-muted-foreground hidden sm:inline">{userEmail}</span>
             <Button variant="ghost" size="sm" onClick={handleLogout}>
               <LogOut className="w-4 h-4 mr-2" />
