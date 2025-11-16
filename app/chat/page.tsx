@@ -81,6 +81,9 @@ export default function ChatPage() {
               timestamp: new Date(),
             },
           ])
+          // Ensure we scroll to bottom after initial load
+          setShouldAutoScroll(true)
+          setIsInitialLoad(true)
         }
       } catch (error) {
         console.error("Failed to initialize chat:", error)
@@ -101,21 +104,43 @@ export default function ChatPage() {
     }
   }, [router])
 
+  const [shouldAutoScroll, setShouldAutoScroll] = useState(true)
+  const [isInitialLoad, setIsInitialLoad] = useState(true)
+
   useEffect(() => {
-    // Scroll to bottom when messages change (but only if we're already at bottom or it's a new message)
+    // Scroll to bottom when messages change
     if (messages.length > 0) {
-      // Only auto-scroll if we're near the bottom or if it's a new message being added
       const container = messagesContainerRef.current
       if (container) {
+        // Always scroll on initial load or if shouldAutoScroll is true
+        // Otherwise, only scroll if user is near bottom (for new messages)
         const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100
-        if (isNearBottom) {
-          setTimeout(() => {
-            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-          }, 100)
+        
+        if (shouldAutoScroll || isInitialLoad || isNearBottom) {
+          // Use requestAnimationFrame to ensure DOM is updated
+          requestAnimationFrame(() => {
+            setTimeout(() => {
+              messagesEndRef.current?.scrollIntoView({ behavior: isInitialLoad ? "auto" : "smooth" })
+              if (isInitialLoad) {
+                setIsInitialLoad(false)
+              }
+              if (shouldAutoScroll) {
+                setShouldAutoScroll(false)
+              }
+            }, 100)
+          })
         }
       }
     }
-  }, [messages])
+  }, [messages, shouldAutoScroll, isInitialLoad])
+
+  // Reset auto-scroll flag when conversation changes
+  useEffect(() => {
+    if (selectedConversation) {
+      setShouldAutoScroll(true)
+      setIsInitialLoad(true)
+    }
+  }, [selectedConversation?.id])
 
   const loadConversationMessages = async (conversationId: string, limit: number = 30, offset: number = 0) => {
     try {
@@ -139,6 +164,9 @@ export default function ChatPage() {
         ])
         setTotalMessageCount(0)
         setHasMoreMessages(false)
+        // Ensure we scroll to bottom after showing welcome message
+        setShouldAutoScroll(true)
+        setIsInitialLoad(true)
       } else {
         // Convert API messages to UI format
         // API returns newest first (descending timestamp), so we need to reverse to get chronological order (oldest first)
@@ -149,6 +177,9 @@ export default function ChatPage() {
         if (offset === 0) {
           // Initial load - replace all messages (sorted chronologically)
           setMessages(uiMessages)
+          // Ensure we scroll to bottom after initial load
+          setShouldAutoScroll(true)
+          setIsInitialLoad(true)
         } else {
           // Loading more - prepend older messages and sort by timestamp to ensure correct order
           setMessages((prev) => {
@@ -191,6 +222,9 @@ export default function ChatPage() {
         ])
         setTotalMessageCount(0)
         setHasMoreMessages(false)
+        // Ensure we scroll to bottom after showing welcome message
+        setShouldAutoScroll(true)
+        setIsInitialLoad(true)
       }
     }
   }
@@ -304,6 +338,9 @@ export default function ChatPage() {
       setMessages(welcomeMessage)
       setTotalMessageCount(0)
       setHasMoreMessages(false)
+      // Ensure we scroll to bottom after creating new conversation
+      setShouldAutoScroll(true)
+      setIsInitialLoad(true)
     } catch (error) {
       console.error("Failed to create conversation:", error)
       alert(error instanceof Error ? error.message : "Failed to create conversation. Please try again.")
@@ -434,6 +471,13 @@ export default function ChatPage() {
           return unique.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
         })
 
+        // Trigger auto-scroll when new messages are added (especially AI responses)
+        // Check if there are any new AI messages that weren't in the previous state
+        const hasNewAIMessages = uiMessages.some(m => m.role === "assistant")
+        if (hasNewAIMessages || aiResponse) {
+          setShouldAutoScroll(true)
+        }
+
         // If AI response found, stop polling and set loading to false
         if (aiResponse) {
           setLoading(false)
@@ -532,6 +576,8 @@ export default function ChatPage() {
       console.log("[handleSend] Messages after adding optimistic:", updated.length)
       return updated
     })
+    // Trigger auto-scroll when new message is sent
+    setShouldAutoScroll(true)
 
     try {
       // Send message to API
@@ -882,3 +928,4 @@ export default function ChatPage() {
     </div>
   )
 }
+
