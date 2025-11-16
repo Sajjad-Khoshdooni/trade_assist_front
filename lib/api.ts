@@ -68,7 +68,8 @@ class ApiClient {
 
   private async request<T>(
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    silentStatusCodes: number[] = []
   ): Promise<T> {
     // Ensure endpoint starts with /
     const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
@@ -95,7 +96,10 @@ class ApiClient {
       }));
       // Include URL in error for debugging
       const errorMessage = error.error || error.message || 'Request failed';
-      console.error(`API Error [${response.status}]: ${errorMessage}`, { url, endpoint: normalizedEndpoint });
+      // Only log errors that aren't in the silent list (e.g., expected 404s during polling)
+      if (!silentStatusCodes.includes(response.status)) {
+        console.error(`API Error [${response.status}]: ${errorMessage}`, { url, endpoint: normalizedEndpoint });
+      }
       throw new Error(`${errorMessage} (${url})`);
     }
 
@@ -160,8 +164,17 @@ class ApiClient {
     });
   }
 
-  async getConversationMessages(conversationId: string): Promise<ChatMessage[]> {
-    return this.request<ChatMessage[]>(`/conversations/${conversationId}/messages/`);
+  async getConversationMessages(
+    conversationId: string,
+    limit?: number,
+    offset?: number
+  ): Promise<{ results: ChatMessage[]; count: number; next: string | null; previous: string | null }> {
+    const params = new URLSearchParams();
+    if (limit !== undefined) params.append('limit', limit.toString());
+    if (offset !== undefined) params.append('offset', offset.toString());
+    const queryString = params.toString();
+    const url = `/conversations/${conversationId}/messages${queryString ? `?${queryString}` : ''}`;
+    return this.request<{ results: ChatMessage[]; count: number; next: string | null; previous: string | null }>(url);
   }
 
   async createChatMessage(
@@ -190,7 +203,8 @@ class ApiClient {
     error_message?: string;
     has_ai_response: boolean;
   }> {
-    return this.request(`/conversations/${conversationId}/messages/${messageId}/status/`);
+    // Suppress 404 errors during polling (message might not exist yet)
+    return this.request(`/conversations/${conversationId}/messages/${messageId}/status/`, {}, [404]);
   }
 
   // News methods

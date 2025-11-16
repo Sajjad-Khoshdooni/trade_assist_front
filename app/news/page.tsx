@@ -98,14 +98,14 @@ export default function NewsPage() {
       {/* Header */}
       <header className="border-b border-border bg-card sticky top-0 z-10">
         <div className="container mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-2 sm:gap-6">
             <Link href="/" className="flex items-center gap-2">
               <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
                 <TrendingUp className="w-5 h-5 text-primary-foreground" />
               </div>
-              <span className="text-xl font-bold text-foreground">TradeAI</span>
+              <span className="text-xl font-bold text-foreground hidden sm:inline">TradeAI</span>
             </Link>
-            <nav className="hidden md:flex items-center gap-4">
+            <nav className="flex items-center gap-2 sm:gap-4">
               <Link href="/chat" className="text-sm text-muted-foreground hover:text-foreground transition-colors font-semibold min-w-[3.5rem] text-center">
                 Chat
               </Link>
