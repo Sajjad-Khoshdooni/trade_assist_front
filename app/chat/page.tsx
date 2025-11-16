@@ -360,20 +360,22 @@ export default function ChatPage() {
       {/* Header */}
       <header className="border-b border-border bg-card">
         <div className="container mx-auto px-4 py-3 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-              <TrendingUp className="w-5 h-5 text-primary-foreground" />
-            </div>
-            <span className="text-xl font-bold text-foreground">TradeAI</span>
-          </Link>
-          <nav className="hidden md:flex items-center gap-4">
-            <Link href="/news" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              News
+          <div className="flex items-center gap-6">
+            <Link href="/" className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
+                <TrendingUp className="w-5 h-5 text-primary-foreground" />
+              </div>
+              <span className="text-xl font-bold text-foreground">TradeAI</span>
             </Link>
-            <Link href="/chat" className="text-sm text-foreground font-medium">
-              Chat
-            </Link>
-          </nav>
+            <nav className="hidden md:flex items-center gap-4">
+              <Link href="/chat" className="text-sm text-foreground font-semibold min-w-[3.5rem] text-center">
+                Chat
+              </Link>
+              <Link href="/news" className="text-sm text-muted-foreground hover:text-foreground transition-colors font-semibold min-w-[3.5rem] text-center">
+                News
+              </Link>
+            </nav>
+          </div>
           <div className="flex items-center gap-4">
             <span className="text-sm text-muted-foreground hidden sm:inline">{userEmail}</span>
             <Button variant="ghost" size="sm" onClick={handleLogout}>
