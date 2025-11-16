@@ -336,13 +336,16 @@ export default function ChatPage() {
         
         // Update messages - only add new messages that don't already exist
         setMessages((prev) => {
+          console.log("[polling] Current messages count:", prev.length)
           // Get all existing message IDs (including temp ones for matching)
           const allExistingIds = new Set(prev.map(m => m.id).filter(Boolean))
+          console.log("[polling] Existing IDs:", Array.from(allExistingIds))
           
           // Filter out messages that already exist by ID or by content+role+timestamp
           const newMessages = uiMessages.filter(m => {
             // Check by ID first
             if (m.id && allExistingIds.has(m.id)) {
+              console.log("[polling] Message already exists by ID:", m.id)
               return false // Message already exists by ID
             }
             // Also check by content, role, and timestamp (within 2 seconds) to catch duplicates
@@ -351,8 +354,12 @@ export default function ChatPage() {
               existing.content === m.content &&
               Math.abs(existing.timestamp.getTime() - m.timestamp.getTime()) < 2000
             )
+            if (isDuplicate) {
+              console.log("[polling] Message is duplicate by content:", m.content.substring(0, 50))
+            }
             return !isDuplicate
           })
+          console.log("[polling] New messages to add:", newMessages.length)
           
           if (newMessages.length === 0) {
             return prev // No new messages
@@ -361,14 +368,17 @@ export default function ChatPage() {
           // Replace temp messages with real ones if they match by content and role
           const updatedPrev = prev.map(existing => {
             if (existing.id?.startsWith('temp-')) {
+              console.log("[polling] Found temp message:", existing.id, "content:", existing.content.substring(0, 30))
               // Find matching real message
               const matching = newMessages.find(m => 
                 m.role === existing.role &&
                 m.content === existing.content
               )
               if (matching) {
+                console.log("[polling] Replacing temp with real message:", matching.id)
                 return matching // Replace temp with real
               }
+              console.log("[polling] No matching real message for temp, keeping temp")
             }
             return existing
           })
@@ -382,12 +392,14 @@ export default function ChatPage() {
               )
               if (matching && matching.id) {
                 replacedIds.add(matching.id)
+                console.log("[polling] Marked message as replaced:", matching.id)
               }
             }
           })
           
           // Get all IDs in updatedPrev
           const updatedIds = new Set(updatedPrev.map(m => m.id).filter(Boolean))
+          console.log("[polling] Updated IDs after replacement:", Array.from(updatedIds))
           
           // Add only truly new messages (not used for replacement, not already in list)
           const messagesToAdd = newMessages.filter(m => 
@@ -395,21 +407,28 @@ export default function ChatPage() {
             !updatedIds.has(m.id) && 
             !replacedIds.has(m.id)
           )
+          console.log("[polling] Messages to add after filtering:", messagesToAdd.length)
           
           if (messagesToAdd.length === 0 && replacedIds.size === 0) {
+            console.log("[polling] No changes needed, returning prev")
             return prev // No changes needed
           }
           
           const combined = [...updatedPrev, ...messagesToAdd]
+          console.log("[polling] Combined messages count:", combined.length)
           
           // Final deduplication by ID
           const seen = new Set<string>()
           const unique = combined.filter(msg => {
             if (!msg.id) return true
-            if (seen.has(msg.id)) return false
+            if (seen.has(msg.id)) {
+              console.log("[polling] Removing duplicate by ID:", msg.id)
+              return false
+            }
             seen.add(msg.id)
             return true
           })
+          console.log("[polling] Final unique messages count:", unique.length)
           
           // Sort by timestamp
           return unique.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
@@ -496,17 +515,22 @@ export default function ChatPage() {
       image: imageUrl,
       timestamp: new Date(),
     }
+    console.log("[handleSend] Adding optimistic message:", optimisticMessage)
     // Add optimistic message immediately - this ensures it shows right away
     setMessages((prev) => {
+      console.log("[handleSend] Current messages before adding optimistic:", prev.length)
       // Check if message already exists to prevent duplicates
       const exists = prev.some(m => 
         m.id === tempMessageId || 
         (m.content === content && m.role === "user" && Math.abs(m.timestamp.getTime() - optimisticMessage.timestamp.getTime()) < 1000)
       )
       if (exists) {
+        console.log("[handleSend] Optimistic message already exists, skipping")
         return prev
       }
-      return [...prev, optimisticMessage]
+      const updated = [...prev, optimisticMessage]
+      console.log("[handleSend] Messages after adding optimistic:", updated.length)
+      return updated
     })
 
     try {
@@ -517,31 +541,58 @@ export default function ChatPage() {
         imageFile || undefined
       )
 
-      // Replace optimistic message with real message from API
-      const realImageUrl = getImageUrl(apiMessage.image_file) || imageUrl || undefined
-      const userMessage: Message = {
-        id: apiMessage.id,
-        role: "user",
-        content: apiMessage.content || content,
-        image: realImageUrl,
-        timestamp: parseTimestamp(apiMessage.timestamp),
-      }
-      
-      // Replace the temporary message with the real one
-      setMessages((prev) => {
-        // Remove the temporary message
-        const filtered = prev.filter(m => m.id !== tempMessageId)
-        // Check if the real message already exists (shouldn't, but safety check)
-        const existingIds = new Set(filtered.map(m => m.id))
-        if (!existingIds.has(userMessage.id)) {
-          // Add the real message
-          const updated = [...filtered, userMessage]
-          // Sort by timestamp to maintain order
-          return updated.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+      console.log("[handleSend] API response:", apiMessage)
+      console.log("[handleSend] API message ID:", apiMessage?.id)
+
+      // Only replace temp message if API returns a valid ID
+      if (apiMessage.id) {
+        // Replace optimistic message with real message from API
+        const realImageUrl = getImageUrl(apiMessage.image_file) || imageUrl || undefined
+        const userMessage: Message = {
+          id: apiMessage.id,
+          role: "user",
+          content: apiMessage.content || content,
+          image: realImageUrl,
+          timestamp: parseTimestamp(apiMessage.timestamp),
         }
-        // If it already exists, just remove the temp message
-        return filtered
-      })
+        
+        // Replace the temporary message with the real one
+        console.log("[handleSend] Replacing temp message with real message:", userMessage.id)
+        setMessages((prev) => {
+          console.log("[handleSend] Current messages before replacement:", prev.length, "temp ID:", tempMessageId)
+          // Remove the temporary message
+          const filtered = prev.filter(m => m.id !== tempMessageId)
+          console.log("[handleSend] Messages after removing temp:", filtered.length)
+          // Check if the real message already exists (shouldn't, but safety check)
+          const existingIds = new Set(filtered.map(m => m.id))
+          if (!existingIds.has(userMessage.id)) {
+            // Add the real message
+            const updated = [...filtered, userMessage]
+            console.log("[handleSend] Messages after adding real:", updated.length)
+            // Sort by timestamp to maintain order
+            return updated.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+          }
+          console.log("[handleSend] Real message already exists, just removing temp")
+          // If it already exists, just remove the temp message
+          return filtered
+        })
+      } else {
+        console.warn("[handleSend] API did not return message ID, keeping temp message. Response:", apiMessage)
+        // Update temp message with API data but keep temp ID
+        setMessages((prev) => {
+          return prev.map(m => {
+            if (m.id === tempMessageId) {
+              return {
+                ...m,
+                content: apiMessage.content || m.content,
+                image: getImageUrl(apiMessage.image_file) || m.image,
+                timestamp: parseTimestamp(apiMessage.timestamp) || m.timestamp,
+              }
+            }
+            return m
+          })
+        })
+      }
       // Update total count since we added a new message
       setTotalMessageCount((prev) => prev + 1)
 
@@ -706,6 +757,10 @@ export default function ChatPage() {
                     </div>
                   )}
                   <div className="space-y-6">
+                    {(() => {
+                      console.log("[render] Rendering messages, count:", messages.length, "messages:", messages.map(m => ({ id: m.id?.substring(0, 20), role: m.role, content: m.content.substring(0, 30) })))
+                      return null
+                    })()}
                     {messages.map((message, index) => (
                       <div key={message.id || `message-${index}`} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
                         <Card
